@@ -32,7 +32,7 @@ app.use(function (err, req, res, next) {
 let processingPayment = false;
 
 // Deposit amount required to change image
-const depositValue = 5;
+const depositValue = 1;
 // Time to wait to validate deposit
 const timeToWait = 60;
 // Image to show
@@ -67,30 +67,46 @@ app.post("/make_a_deposit", async (req, res) => {
       let { account, seed } = await getAccountInfo();
       let timer = timeToWait;
       interval = setInterval(async () => {
-        timer--;
-        let account_history = await banano.get_account_history(account);
-        if (Array.isArray(account_history.history)) {
-          let timestamp = dayjs.unix(
-            account_history.history[0].local_timestamp
-          );
-          let now = dayjs();
-          if (
-            (now.diff(timestamp, "seconds") <= timeToWait &&
-              account_history.history[0].type === "receive",
-            account_history.history[0].confirmed)
-          ) {
-            // We have received a deposit within 60 seconds from the proper address
-            paymentReceived(seed);
-          }
-          if (timer <= 0) {
-            paymentNotReceived();
+        if (processingPayment) {
+          timer--;
+          let account_history = await banano.get_account_history(account);
+          if (Array.isArray(account_history.history)) {
+            let timestamp = dayjs.unix(
+              account_history.history[0].local_timestamp
+            );
+            let now = dayjs();
+            if (
+              (now.diff(timestamp, "seconds") <= timeToWait &&
+                account_history.history[0].type === "receive",
+              account_history.history[0].confirmed)
+            ) {
+              // We have received a deposit within 60 seconds from the proper address
+              // is it the right amount?
+              if (account_history.history[0].amount_decimal >= depositValue) {
+                processingPayment = false;
+                paymentReceived(seed, account);
+              } else {
+                console.log("Wrong amount");
+                // wrong amount received.
+                await bananojs.sendBananoWithdrawalFromSeed(
+                  seed,
+                  0,
+                  account_history.history[0].account,
+                  account_history.history[0].amount_decimal
+                );
+
+                res.send("Wrong amount of BAN Sent. Please try again.");
+              }
+            }
+            if (timer <= 0) {
+              paymentNotReceived();
+              res.send("BAN not received. Please try again");
+            }
           }
         }
       }, 1000);
       res.send(account);
-    } catch (error) {
-      console.log(error);
-    }
+    } catch (error) {}
   }
 });
 
@@ -98,32 +114,34 @@ http.createServer({}, app).listen(8020, function () {
   console.log("Running App on port 8020");
 });
 
-async function paymentReceived(seed) {
+async function paymentReceived(seed, account) {
   // stop our check loop
   clearInterval(interval);
   currentImage = imageInHolding;
-  processingPayment = false;
-
+  let balance = await banano.check_bal(account);
   // send balance along
-  await bananojs.sendBananoWithdrawalFromSeed(
-    seed,
-    0,
-    process.env.BANADDR,
-    0.01
-  );
-
-  setTimeout(async () => {
-    await bananojs.receiveBananoDepositsForSeed(
-      process.env.SEED,
+  if (balance > 0) {
+    await bananojs.sendBananoWithdrawalFromSeed(
+      seed,
       0,
-      process.env.BANADDR
+      process.env.BANADDR,
+      depositValue
     );
-  }, 5000);
+
+    let depositInterval = setInterval(async () => {
+      let res = await bananojs.receiveBananoDepositsForSeed(seed, 0, account);
+      console.log(res);
+      if (res) {
+        clearInterval(depositInterval);
+      }
+    }, 6000);
+  }
 }
 
 async function paymentNotReceived() {
   clearInterval(interval);
   processingPayment = false;
+  imageInHolding = null;
 }
 
 /*
@@ -137,9 +155,6 @@ async function getAccountInfo() {
   const publicKey = await bananojs.getPublicKey(privateKey);
   const account = bananojs.getBananoAccount(publicKey);
   bananojs.setBananodeApiUrl(url);
-  setTimeout(async () => {
-    let res = await bananojs.receiveBananoDepositsForSeed(seed, 0, account);
-  }, 5000);
   return { account, seed };
 }
 

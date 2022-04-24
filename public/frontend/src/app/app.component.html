@@ -307,5 +307,11 @@
 
   <input type="file" (change)="onFileChanged($event)" />
   <p *ngIf="address">Please send 5 BAN to this Address: {{ address }}</p>
+  <qrcode
+    [qrdata]="address"
+    *ngIf="address"
+    [width]="256"
+    [errorCorrectionLevel]="'M'"
+  ></qrcode>
   <router-outlet></router-outlet>
 </div>

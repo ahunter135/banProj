@@ -23,8 +23,12 @@ export class AppComponent {
         let res = await this.http.post("http://localhost:8020/make_a_deposit", {image: b64Image}, {responseType: 'text'}).toPromise();
         console.log(res);
         try {
-          this.address = res;
-          console.log(res);
+          if (res.includes('ban_')) {
+            this.address = res;
+            console.log(res);
+          } else {
+            alert(res);
+          }
         } catch (error) {
           console.log(error);
         }
